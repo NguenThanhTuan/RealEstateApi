@@ -1,0 +1,44 @@
+using Microsoft.AspNetCore.Http;
+using System.Security.Claims;
+using System.Threading.Tasks;
+using RealEstateApi.Data;
+using Microsoft.EntityFrameworkCore;
+
+public class DeviceIdValidatorMiddleware
+{
+    private readonly RequestDelegate _next;
+
+    public DeviceIdValidatorMiddleware(RequestDelegate next)
+    {
+        _next = next;
+    }
+
+    public async Task InvokeAsync(HttpContext context, AppDbContext dbContext)
+    {
+        // Kiểm tra nếu user đã xác thực
+        if (context.User.Identity != null && context.User.Identity.IsAuthenticated)
+        {
+            var userIdStr = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var deviceIdFromToken = context.User.Claims.FirstOrDefault(c => c.Type == "DeviceId")?.Value;
+
+            if (!string.IsNullOrEmpty(userIdStr) && int.TryParse(userIdStr, out int userId))
+            {
+                var user = await dbContext.Users.FindAsync(userId);
+
+                if (user == null || user.DeviceId != deviceIdFromToken)
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    await context.Response.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = "Không được phép đăng nhập từ thiết bị này."
+                    });
+                    return;
+                }
+            }
+        }
+
+        // Cho request đi tiếp
+        await _next(context);
+    }
+}
