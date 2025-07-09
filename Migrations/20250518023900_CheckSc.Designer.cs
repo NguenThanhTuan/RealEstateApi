@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using RealEstateApi.Data;
@@ -11,9 +12,11 @@ using RealEstateApi.Data;
 namespace RealEstateApi.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250518023900_CheckSc")]
+    partial class CheckSc
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -188,9 +191,6 @@ namespace RealEstateApi.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<int?>("createdBy")
-                        .HasColumnType("integer");
-
                     b.Property<string>("description")
                         .HasColumnType("text");
 
@@ -203,9 +203,6 @@ namespace RealEstateApi.Migrations
 
                     b.Property<int?>("floors")
                         .HasColumnType("integer");
-
-                    b.Property<DateTime?>("highlightedDate")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<float>("length")
                         .HasColumnType("real");

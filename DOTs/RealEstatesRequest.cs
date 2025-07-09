@@ -186,6 +186,8 @@ namespace RealEstateApi.DOTs
         public double? width { get; set; }
         public DateTime postedDate { get; set; }
         public DateTime updatedDate { get; set; }
+        public int? createdBy { get; set; }
+        public DateTime? highlightedDate { get; set; }
         public List<ImageDto>? images { get; set; }
 
         public class ImageDto

@@ -1,5 +1,6 @@
 ﻿using FirebaseAdmin.Messaging;
 using Microsoft.EntityFrameworkCore;
+using RealEstateApi.Controllers;
 using RealEstateApi.Models;
 using System.Xml;
 
@@ -20,6 +21,7 @@ namespace RealEstateApi.Data
         public DbSet<Ward> Wards { get; set; }
         public DbSet<Notifications> Notifications { get; set; }
         public DbSet<NotificationRead> NotificationReads { get; set; }
+        public DbSet<AppConfigM> AppConfigs { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -49,6 +51,7 @@ namespace RealEstateApi.Data
                 .WithMany(u => u.NotificationReads)
                 .HasForeignKey(nr => nr.userId)
                 .OnDelete(DeleteBehavior.Cascade);
+            modelBuilder.Entity<AppConfigM>().HasKey(p => p.id);
 
             //modelBuilder.Entity<District>()
             //.HasOne(d => d.province)

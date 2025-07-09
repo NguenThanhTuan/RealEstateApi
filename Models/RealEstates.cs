@@ -25,6 +25,8 @@ namespace RealEstateApi.Models
         public float width { get; set; } // Chiều rộng
         public DateTime postedDate { get; set; } = DateTime.UtcNow;
         public DateTime? updatedDate { get; set; }
+        public int? createdBy { get; set; }
+        public DateTime? highlightedDate { get; set; }
 
         public List<RealEstateImages> images { get; set; } = new List<RealEstateImages>(); // Danh sách ảnh liên quan đến BĐS
     }

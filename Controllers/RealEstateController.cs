@@ -8,6 +8,7 @@ using System.Xml;
 using RealEstateApi.DOTs;
 using Microsoft.AspNetCore.Http.HttpResults;
 using System.Security.Claims;
+using System.Data;
 
 namespace RealEstateApi.Controllers
 {
@@ -224,7 +225,8 @@ namespace RealEstateApi.Controllers
                     description = request.description,
                     length = request.length,
                     width = request.width,
-                    updatedDate = null
+                    updatedDate = null,
+                    createdBy = currentUserId
                 };
 
                 _context.RealEstates.Add(estate);
@@ -289,6 +291,7 @@ namespace RealEstateApi.Controllers
                     estate.length,
                     estate.width,
                     estate.postedDate,
+                    estate.createdBy,
                     images = savedImages.Select(img => new
                     {
                         img.imageId,
@@ -500,6 +503,8 @@ namespace RealEstateApi.Controllers
             try
             {
                 var currentUserId = GetCurrentUserId();
+                var userRole = int.Parse(User.FindFirst(ClaimTypes.Role)?.Value ?? "0");
+
                 if (request == null)
                 {
                     return BadRequest(ApiResult.Error<object>("Dữ liệu không hợp lệ", 400));
@@ -542,6 +547,23 @@ namespace RealEstateApi.Controllers
 
                 if (estate == null)
                     return NotFound(ApiResult.Error<object>("Không tìm thấy bất động sản", 404));
+
+                // Kiểm tra phân quyền: nếu là Đầu Chủ thì chỉ được sửa BĐS của mình
+                if (userRole == 2)
+                {
+                    if (estate.createdBy.HasValue && estate.createdBy.Value != currentUserId)
+                        return BadRequest(ApiResult.Error<object>("Tài khoản của bạn không được phép sửa bất động sản", 403));
+                }   
+
+                if (userRole == 3)
+                {
+                    return BadRequest(ApiResult.Error<object>("Tài khoản của bạn không được phép sửa bất động sản", 403));
+                }
+
+                if (estate.createdBy == null)
+                {
+                    estate.createdBy = currentUserId;
+                }
 
                 // Cập nhật thông tin
                 estate.name = request.name;
@@ -660,6 +682,7 @@ namespace RealEstateApi.Controllers
                     width = estate.width,
                     postedDate = estate.postedDate,
                     updatedDate = estate.updatedDate ?? DateTime.UtcNow,
+                    createdBy = estate.createdBy,
                     images = estate.images.Select(img => new RealEstateNotificationDto.ImageDto
                     {
                         imageId = img.imageId,
@@ -693,10 +716,30 @@ namespace RealEstateApi.Controllers
         {
             try
             {
+                var currentUserId = GetCurrentUserId();
+                var userRole = int.Parse(User.FindFirst(ClaimTypes.Role)?.Value ?? "0");
+
                 var estate = await _context.RealEstates.FindAsync(id);
                 if (estate == null)
                 {
                     return NotFound(ApiResult.Error<object>("Bất động sản không tồn tại", 404));
+                }
+
+                // Kiểm tra phân quyền: nếu là Đầu Chủ thì chỉ được sửa BĐS của mình
+                if (userRole == 2)
+                {
+                    if (estate.createdBy.HasValue && estate.createdBy.Value != currentUserId)
+                        return BadRequest(ApiResult.Error<object>("Tài khoản của bạn không được phép sửa bất động sản", 403));
+                }
+
+                if (userRole == 3)
+                {
+                    return BadRequest(ApiResult.Error<object>("Tài khoản của bạn không được phép sửa bất động sản", 403));
+                }
+
+                if (estate.createdBy == null)
+                {
+                    estate.createdBy = currentUserId;
                 }
 
                 //estate.status = newStatus;
@@ -727,6 +770,9 @@ namespace RealEstateApi.Controllers
         {
             try
             {
+                var currentUserId = GetCurrentUserId();
+                var userRole = int.Parse(User.FindFirst(ClaimTypes.Role)?.Value ?? "0");
+
                 var realEstate = await _context.RealEstates
                     .Include(r => r.images)
                     .FirstOrDefaultAsync(r => r.realEstateId == id);
@@ -734,6 +780,18 @@ namespace RealEstateApi.Controllers
                 if (realEstate == null)
                 {
                     return NotFound(ApiResult.Error<object>("Bất động sản không tồn tại", 404));
+                }
+
+                // Kiểm tra phân quyền: nếu là Đầu Chủ thì chỉ được sửa BĐS của mình
+                if (userRole == 2)
+                {
+                    if (realEstate.createdBy.HasValue && realEstate.createdBy.Value != currentUserId)
+                        return BadRequest(ApiResult.Error<object>("Tài khoản của bạn không được phép xóa bất động sản này", 403));
+                }
+
+                if (userRole == 3)
+                {
+                    return BadRequest(ApiResult.Error<object>("Tài khoản của bạn không được phép xóa bất động sản", 403));
                 }
 
                 // Xóa ảnh nếu có
@@ -771,10 +829,42 @@ namespace RealEstateApi.Controllers
             }
         }
 
-        [Authorize]
+        //[Authorize]
+        [AllowAnonymous]
         [HttpGet("{id}")]
         public async Task<IActionResult> GetRealEstateById(int id)
         {
+            var showNews = _context.AppConfigs
+                .FirstOrDefault(x => x.key == "NewsScreen")?.value;
+
+            var show = showNews == "true";
+
+            var userAgent = Request.Headers["User-Agent"].ToString();
+            var isAndroid = userAgent.Contains("Android", StringComparison.OrdinalIgnoreCase);
+
+            // Lấy config Android
+            var showNewsAndr = _context.AppConfigs
+                .FirstOrDefault(x => x.key == "NewsScreenAndr")?.value;
+
+            var showAndr = showNewsAndr == "true";
+
+            if (isAndroid)
+            {
+                if (!showAndr && (!HttpContext.User.Identity?.IsAuthenticated ?? true))
+                {
+                    return Unauthorized(ApiResult.Error<object>("Không có quyền truy cập", 401));
+                }
+            }
+            else
+            {
+                // Nếu không phải public mà không có token -> từ chối
+                //if (!show && !isAndroid && (!HttpContext.User.Identity?.IsAuthenticated ?? true))
+                if (!show && (!HttpContext.User.Identity?.IsAuthenticated ?? true))
+                {
+                    return Unauthorized(ApiResult.Error<object>("Không có quyền truy cập", 401));
+                }
+            }
+
             try
             {
                 var realEstate = await _context.RealEstates
@@ -807,6 +897,8 @@ namespace RealEstateApi.Controllers
                     realEstate.length,
                     realEstate.width,
                     realEstate.postedDate,
+                    realEstate.highlightedDate,
+                    realEstate.createdBy,
                     images = realEstate.images.Select(i => new 
                     {
                         i.imageId,
@@ -822,15 +914,47 @@ namespace RealEstateApi.Controllers
             }
         }
 
-        [Authorize]
+        //[Authorize]
+        [AllowAnonymous]
         [HttpGet]
         public async Task<IActionResult> GetAll()
         {
+            var showNews = _context.AppConfigs
+                .FirstOrDefault(x => x.key == "NewsScreen")?.value;
+
+            var show = showNews == "true";
+
+            var userAgent = Request.Headers["User-Agent"].ToString();
+            var isAndroid = userAgent.Contains("Android", StringComparison.OrdinalIgnoreCase);
+
+            // Lấy config Android
+            var showNewsAndr = _context.AppConfigs
+                .FirstOrDefault(x => x.key == "NewsScreenAndr")?.value;
+
+            var showAndr = showNewsAndr == "true";
+
+            if (isAndroid)
+            {
+                if (!showAndr && (!HttpContext.User.Identity?.IsAuthenticated ?? true))
+                {
+                    return Unauthorized(ApiResult.Error<object>("Không có quyền truy cập", 401));
+                }
+            }
+            else
+            {
+                // Nếu không phải public mà không có token -> từ chối
+                //if (!show && !isAndroid && (!HttpContext.User.Identity?.IsAuthenticated ?? true))
+                if (!show && (!HttpContext.User.Identity?.IsAuthenticated ?? true))
+                {
+                    return Unauthorized(ApiResult.Error<object>("Không có quyền truy cập", 401));
+                }
+            }
+
             try
             {
                 var data = await _context.RealEstates
                 .Include(r => r.images)
-                .OrderByDescending(r => r.postedDate)
+                .OrderByDescending(r => r.highlightedDate ?? r.postedDate)
                 .Select(r => new
                 {
                     r.realEstateId,
@@ -852,6 +976,8 @@ namespace RealEstateApi.Controllers
                     r.length,
                     r.width,
                     r.postedDate,
+                    r.createdBy,
+                    r.highlightedDate,
                     images = r.images.Select(img => new {
                         img.imageId,
                         img.imageUrl
@@ -866,10 +992,42 @@ namespace RealEstateApi.Controllers
             }
         }
 
-        [Authorize]
+        //[Authorize]
+        [AllowAnonymous]
         [HttpPost("search")]
         public async Task<IActionResult> Search([FromBody] RealEstateSearchRequest request)
         {
+            var showNews = _context.AppConfigs
+                .FirstOrDefault(x => x.key == "NewsScreen")?.value;
+
+            var show = showNews == "true";
+
+            var userAgent = Request.Headers["User-Agent"].ToString();
+            var isAndroid = userAgent.Contains("Android", StringComparison.OrdinalIgnoreCase);
+
+            // Lấy config Android
+            var showNewsAndr = _context.AppConfigs
+                .FirstOrDefault(x => x.key == "NewsScreenAndr")?.value;
+
+            var showAndr = showNewsAndr == "true";
+
+            if (isAndroid)
+            {
+                if (!showAndr && (!HttpContext.User.Identity?.IsAuthenticated ?? true))
+                {
+                    return Unauthorized(ApiResult.Error<object>("Không có quyền truy cập", 401));
+                }
+            }
+            else
+            {
+                // Nếu không phải public mà không có token -> từ chối
+                //if (!show && !isAndroid && (!HttpContext.User.Identity?.IsAuthenticated ?? true))
+                if (!show && (!HttpContext.User.Identity?.IsAuthenticated ?? true))
+                {
+                    return Unauthorized(ApiResult.Error<object>("Không có quyền truy cập", 401));
+                }
+            }
+
             try
             {
                 if (request.pageIndex < 1) request.pageIndex = 1;
@@ -928,7 +1086,7 @@ namespace RealEstateApi.Controllers
                 //    .ToListAsync();
 
                 var data = await query
-                    .OrderByDescending(r => r.postedDate)
+                    .OrderByDescending(r => r.highlightedDate ?? r.postedDate)
                     .Skip((request.pageIndex - 1) * request.pageSize)
                     .Take(request.pageSize)
                     .Include(x => x.images)
@@ -953,6 +1111,10 @@ namespace RealEstateApi.Controllers
                         x.length,
                         x.width,
                         x.postedDate,
+                        x.createdBy,
+                        x.highlightedDate,
+                        //isPush = x.postedDate.AddHours(48) <= DateTime.UtcNow,
+                        //isPush = true,
                         images = x.images.Select(img => new
                         {
                             img.imageId,
@@ -979,10 +1141,174 @@ namespace RealEstateApi.Controllers
             }
         }
 
-        [Authorize]
+        [Authorize(Roles = "2")]
+        [HttpPost("search-by-owner")]
+        public async Task<IActionResult> SearchByOwner([FromBody] RealEstateSearchRequest request)
+        {
+            //var showNews = _context.AppConfigs
+            //    .FirstOrDefault(x => x.key == "NewsScreen")?.value;
+
+            //var show = showNews == "true";
+
+            //var userAgent = Request.Headers["User-Agent"].ToString();
+            //var isAndroid = userAgent.Contains("Android", StringComparison.OrdinalIgnoreCase);
+
+            // Nếu không phải public mà không có token -> từ chối
+            //if (!show && !isAndroid && (!HttpContext.User.Identity?.IsAuthenticated ?? true))
+            //{
+            //    return Unauthorized(ApiResult.Error<object>("Không có quyền truy cập", 401));
+            //}
+
+            try
+            {
+                var currentUserId = GetCurrentUserId();
+                if (request.pageIndex < 1) request.pageIndex = 1;
+                if (request.pageSize < 1) request.pageSize = 10;
+
+                var query = _context.RealEstates.Where(x => x.createdBy == currentUserId).AsQueryable();
+
+                // Tìm theo keyword
+                if (!string.IsNullOrWhiteSpace(request.search))
+                {
+                    var keyword = request.search.ToLower();
+                    query = query.Where(x =>
+                        x.name.ToLower().Contains(keyword) ||
+                        x.price.ToString().Contains(keyword) ||
+                        x.province.ToLower().Contains(keyword) ||
+                        x.district.ToLower().Contains(keyword) ||
+                        x.ward.ToLower().Contains(keyword) ||
+                        x.street.ToLower().Contains(keyword) ||
+                        x.category.ToLower().Contains(keyword));
+                }
+
+                if (request.filter != null)
+                {
+                    var f = request.filter;
+                    if (f.minPrice.HasValue)
+                        query = query.Where(x => x.price >= f.minPrice);
+                    if (f.maxPrice.HasValue)
+                        query = query.Where(x => x.price <= f.maxPrice);
+                    if (f.minArea.HasValue)
+                        query = query.Where(x => x.area >= f.minArea);
+                    if (f.maxArea.HasValue)
+                        query = query.Where(x => x.area <= f.maxArea);
+                    if (!string.IsNullOrWhiteSpace(f.province))
+                        query = query.Where(x => x.province.Contains(f.province));
+                    if (!string.IsNullOrWhiteSpace(f.district))
+                        query = query.Where(x => x.district.Contains(f.district));
+                    if (!string.IsNullOrWhiteSpace(f.ward))
+                        query = query.Where(x => x.ward.Contains(f.ward));
+                    if (!string.IsNullOrWhiteSpace(f.street))
+                        query = query.Where(x => x.street.Contains(f.street));
+                    if (!string.IsNullOrWhiteSpace(f.category))
+                        query = query.Where(x => x.category.Contains(f.category));
+                    if (!string.IsNullOrWhiteSpace(f.status))
+                        query = query.Where(x => x.status.Contains(f.status));
+                }
+
+                // Tổng số kết quả
+                var total = await query.CountAsync();
+
+                // Lấy dữ liệu phân trang và include ảnh
+                //var paging = request.paging ?? new PagingRequest();
+                //var data = await query
+                //    .Skip((request.pageIndex - 1) * request.pageSize)
+                //    .Take(request.pageSize)
+                //    .Include(x => x.images)
+                //    .ToListAsync();
+
+                var data = await query
+                    .OrderByDescending(r => r.highlightedDate ?? r.postedDate)
+                    .Skip((request.pageIndex - 1) * request.pageSize)
+                    .Take(request.pageSize)
+                    .Include(x => x.images)
+                    .Select(x => new
+                    {
+                        x.realEstateId,
+                        x.name,
+                        x.price,
+                        x.province,
+                        x.district,
+                        x.ward,
+                        x.street,
+                        x.category,
+                        x.status,
+                        x.area,
+                        x.roadWidth,
+                        x.floors,
+                        x.bedrooms,
+                        x.bathrooms,
+                        x.direction,
+                        x.description,
+                        x.length,
+                        x.width,
+                        x.postedDate,
+                        x.createdBy,
+                        x.highlightedDate,
+                        //isPush = x.postedDate.AddHours(48) <= DateTime.UtcNow,
+                        //isPush = true,
+                        images = x.images.Select(img => new
+                        {
+                            img.imageId,
+                            img.imageUrl
+                        }).ToList()
+                    })
+                    .ToListAsync();
+
+                var res = new
+                {
+                    success = true,
+                    items = data,
+                    pageIndex = request.pageIndex,
+                    totalRecords = total,
+                    message = "Kết quả tìm kiếm",
+                    code = 200
+                };
+
+                return Ok(res);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ApiResult.Error<object>($"Không thể lấy danh sách. Lỗi: {ex.Message}", 400));
+            }
+        }
+
+        //[Authorize]
+        [AllowAnonymous]
         [HttpGet("latest")]
         public async Task<IActionResult> GetLatestRealEstates(int count = 10)
         {
+            var showNews = _context.AppConfigs
+                .FirstOrDefault(x => x.key == "NewsScreen")?.value;
+
+            var show = showNews == "true";
+
+            var userAgent = Request.Headers["User-Agent"].ToString();
+            var isAndroid = userAgent.Contains("Android", StringComparison.OrdinalIgnoreCase);
+
+            // Lấy config Android
+            var showNewsAndr = _context.AppConfigs
+                .FirstOrDefault(x => x.key == "NewsScreenAndr")?.value;
+
+            var showAndr = showNewsAndr == "true";
+
+            if (isAndroid)
+            {
+                if (!showAndr && (!HttpContext.User.Identity?.IsAuthenticated ?? true))
+                {
+                    return Unauthorized(ApiResult.Error<object>("Không có quyền truy cập", 401));
+                }
+            }
+            else
+            {
+                // Nếu không phải public mà không có token -> từ chối
+                //if (!show && !isAndroid && (!HttpContext.User.Identity?.IsAuthenticated ?? true))
+                if (!show && (!HttpContext.User.Identity?.IsAuthenticated ?? true))
+                {
+                    return Unauthorized(ApiResult.Error<object>("Không có quyền truy cập", 401));
+                }
+            }
+
             try
             {
                 var latestEstates = await _context.RealEstates
@@ -1024,6 +1350,197 @@ namespace RealEstateApi.Controllers
                 return BadRequest(ApiResult.Error<object>($"Không thể lấy danh sách. Lỗi: {ex.Message}", 400));
             }
         }
+
+        [Authorize]
+        [HttpGet("statistics")]
+        public async Task<IActionResult> GetRealEstateStatistics()
+        {
+            var role = int.Parse(User.FindFirst(ClaimTypes.Role)?.Value ?? "0");
+            if (role != 1)
+                return Unauthorized(ApiResult.Error<object>("Không có quyền truy cập", 401));
+
+            try
+            {
+                var tongBatDongSan = await _context.RealEstates.CountAsync();
+                var trangThai = await _context.RealEstates
+                .GroupBy(r => r.status)
+                .Select(g => new
+                {
+                    status = g.Key,
+                    count = g.Count()
+                })
+                .ToListAsync();
+                var dauChuList = await _context.Users
+                    .Where(u => u.role == 2)
+                    .Select(u => new
+                    {
+                        userId = u.userId,
+                        name = u.fullName,
+                        // Thống kê bất động sản của từng đầu chủ
+                        dangBan = _context.RealEstates.Count(r => r.createdBy == u.userId && r.status == "Đang bán"),
+                        landBan = _context.RealEstates.Count(r => r.createdBy == u.userId && r.status == "68 land bán"),
+                        chuNhaBan = _context.RealEstates.Count(r => r.createdBy == u.userId && r.status == "Chủ nhà bán"),
+                        dungBan = _context.RealEstates.Count(r => r.createdBy == u.userId && r.status == "Dừng bán"),
+                        tong = _context.RealEstates.Count(r => r.createdBy == u.userId)
+                    })
+                .ToListAsync();
+
+                var statistics = new
+                {
+                    tongBatDongSan,
+                    trangThai,
+                    dauChu = dauChuList
+                };
+
+                //var statistics = new
+                //{
+                //    tongBatDongSan = await _context.RealEstates.CountAsync(),
+
+                //    trangThai = await _context.RealEstates
+                //    .GroupBy(r => r.status)
+                //    .Select(g => new
+                //    {
+                //        status = g.Key,
+                //        count = g.Count()
+                //    })
+                //    .ToListAsync(),
+
+                //    dauChu = await _context.RealEstates
+                //    .Where(r => r.createdBy != null)
+                //    .GroupBy(r => r.createdBy)
+                //    .Select(g => new
+                //    {
+                //        userId = g.Key,
+                //        name = _context.Users.Where(u => u.userId == g.Key).Select(u => u.fullName).FirstOrDefault(),
+                //        dangBan = g.Count(r => r.status == "Đang bán"),
+                //        landBan = g.Count(r => r.status == "68 land bán"),
+                //        chuNhaBan = g.Count(r => r.status == "Chủ nhà bán"),
+                //        dungBan = g.Count(r => r.status == "Dừng bán"),
+                //        tong = g.Count()
+                //    })
+                //    .ToListAsync()
+                //};
+
+                return Ok(ApiResult.Success(statistics, "Thống kê bất động sản", 200));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ApiResult.Error<object>($"Không thể lấy danh sách. Lỗi: {ex.Message}", 400));
+            }
+        }
+
+        [Authorize(Roles = "2")]
+        [HttpPost("push-noti/{id}")]
+        public async Task<IActionResult> PushRealEstate(int id)
+        {
+            try
+            {
+                var userId = GetCurrentUserId();
+
+                var estate = await _context.RealEstates.FindAsync(id);
+                if (estate == null)
+                    return NotFound(ApiResult.Error<object>("Không tìm thấy bất động sản", 404));
+
+                // Kiểm tra quyền: chỉ đầu chủ của BĐS đó được đẩy
+                if (estate.createdBy != userId)
+                    return Unauthorized(ApiResult.Error<object>("Không có quyền đẩy tin", 403));
+
+                // Kiểm tra thời gian đăng đã đủ 48 giờ chưa
+                var hoursSincePosted = (DateTime.UtcNow - estate.postedDate).TotalHours;
+                if (hoursSincePosted < 48)
+                    return BadRequest(ApiResult.Error<object>("Cần ít nhất 48 giờ sau khi đăng mới được đẩy tin", 400));
+
+                // Đánh dấu nổi bật để hiển thị lên đầu danh sách
+                estate.highlightedDate = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+
+                // Gửi thông báo (ví dụ gửi đến role 3 - đầu khách)
+                var dto = new RealEstateNotificationDto
+                {
+                    realEstateId = estate.realEstateId,
+                    name = estate.name,
+                    price = estate.price,
+                    province = estate.province,
+                    district = estate.district,
+                    ward = estate.ward,
+                    street = estate.street,
+                    category = estate.category,
+                    status = estate.status,
+                    area = estate.area,
+                    roadWidth = estate.roadWidth,
+                    floors = estate.floors,
+                    bedrooms = estate.bedrooms,
+                    bathrooms = estate.bathrooms,
+                    direction = estate.direction ?? "",
+                    description = estate.description ?? "",
+                    length = estate.length,
+                    width = estate.width,
+                    postedDate = estate.postedDate,
+                    updatedDate = estate.updatedDate ?? DateTime.UtcNow,
+                    images = await _context.RealEstateImages
+                        .Where(i => i.realEstateId == id)
+                        .Select(i => new RealEstateNotificationDto.ImageDto
+                        {
+                            imageId = i.imageId,
+                            imageUrl = i.imageUrl
+                        }).ToListAsync()
+                };
+
+                await _notificationService.CreateAndSendNotificationAsync(3, dto, userId);
+
+                return Ok(ApiResult.Success<object>("", "Đẩy tin thành công", 200));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ApiResult.Error<object>($"Lỗi khi đẩy tin: {ex.Message}", 500));
+            }
+        }
+
+        //[Authorize]
+        //[HttpGet("latest")]
+        //public async Task<IActionResult> GetLatestRealEstates(int count = 10)
+        //{
+        //    try
+        //    {
+        //        var latestEstates = await _context.RealEstates
+        //            .OrderByDescending(r => r.postedDate)
+        //            .Take(count)
+        //            .Select(r => new
+        //            {
+        //                r.realEstateId,
+        //                r.name,
+        //                r.price,
+        //                r.province,
+        //                r.district,
+        //                r.ward,
+        //                r.street,
+        //                r.category,
+        //                r.status,
+        //                r.area,
+        //                r.roadWidth,
+        //                r.floors,
+        //                r.bedrooms,
+        //                r.bathrooms,
+        //                r.direction,
+        //                r.description,
+        //                r.length,
+        //                r.width,
+        //                r.postedDate,
+        //                images = r.images.Select(i => new
+        //                {
+        //                    i.imageId,
+        //                    i.imageUrl
+        //                }).ToList()
+        //            })
+        //            .ToListAsync();
+
+        //        return Ok(ApiResult.Success<object>(latestEstates, "Danh sách BĐS mới nhất", 200));
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        return BadRequest(ApiResult.Error<object>($"Không thể lấy danh sách. Lỗi: {ex.Message}", 400));
+        //    }
+        //}
 
         private int GetCurrentUserId()
         {

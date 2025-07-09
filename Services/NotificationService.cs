@@ -44,9 +44,17 @@ public class NotificationService : INotificationService
             }
 
             //var title = $"{estate.name} {(type == 1 ? " vừa mới được thêm vào kho hàng" : " vừa mới được cập nhật thông tin")}";
-            var title = type == 1
-                ? $"{estate.name} vừa mới được thêm vào kho hàng"
-                : $"{estate.name} vừa mới được cập nhật thông tin";
+            //var title = type == 1
+            //    ? $"{estate.name} vừa mới được thêm vào kho hàng"
+            //    : $"{estate.name} vừa mới được cập nhật thông tin";
+
+            string title = type switch
+            {
+                1 => $"{estate.name} vừa mới được thêm vào kho hàng",
+                2 => $"{estate.name} vừa mới được cập nhật thông tin",
+                3 => $"{estate.name} - bất động sản nổi bật vừa được đẩy tin",
+                _ => $"{estate.name} vừa có thay đổi"
+            };
 
             var addressParts = new List<string?>
             {
