@@ -652,6 +652,7 @@ namespace RealEstateApi.Controllers
                     estate.length,
                     estate.width,
                     estate.postedDate,
+                    isPush = estate.createdBy == currentUserId && estate.postedDate.AddHours(48) <= DateTime.UtcNow,
                     estate.updatedDate,
                     images = estate.images.Select(img => new
                     {
@@ -867,6 +868,7 @@ namespace RealEstateApi.Controllers
 
             try
             {
+                var currentUserId = GetCurrentUserId();
                 var realEstate = await _context.RealEstates
                     .Include(r => r.images)
                     .FirstOrDefaultAsync(r => r.realEstateId == id);
@@ -897,6 +899,7 @@ namespace RealEstateApi.Controllers
                     realEstate.length,
                     realEstate.width,
                     realEstate.postedDate,
+                    isPush = realEstate.createdBy == currentUserId && realEstate.postedDate.AddHours(48) <= DateTime.UtcNow,
                     realEstate.highlightedDate,
                     realEstate.createdBy,
                     images = realEstate.images.Select(i => new 
@@ -952,6 +955,7 @@ namespace RealEstateApi.Controllers
 
             try
             {
+                var currentUserId = GetCurrentUserId();
                 var data = await _context.RealEstates
                 .Include(r => r.images)
                 .OrderByDescending(r => r.highlightedDate ?? r.postedDate)
@@ -976,6 +980,7 @@ namespace RealEstateApi.Controllers
                     r.length,
                     r.width,
                     r.postedDate,
+                    isPush = r.createdBy == currentUserId && r.postedDate.AddHours(48) <= DateTime.UtcNow,
                     r.createdBy,
                     r.highlightedDate,
                     images = r.images.Select(img => new {
@@ -1030,6 +1035,7 @@ namespace RealEstateApi.Controllers
 
             try
             {
+                var currentUserId = GetCurrentUserId();
                 if (request.pageIndex < 1) request.pageIndex = 1;
                 if (request.pageSize < 1) request.pageSize = 10;
 
@@ -1113,7 +1119,7 @@ namespace RealEstateApi.Controllers
                         x.postedDate,
                         x.createdBy,
                         x.highlightedDate,
-                        //isPush = x.postedDate.AddHours(48) <= DateTime.UtcNow,
+                        isPush = x.createdBy == currentUserId && x.postedDate.AddHours(48) <= DateTime.UtcNow,
                         //isPush = true,
                         images = x.images.Select(img => new
                         {
@@ -1245,7 +1251,7 @@ namespace RealEstateApi.Controllers
                         x.postedDate,
                         x.createdBy,
                         x.highlightedDate,
-                        //isPush = x.postedDate.AddHours(48) <= DateTime.UtcNow,
+                        isPush = x.createdBy == currentUserId && x.postedDate.AddHours(48) <= DateTime.UtcNow,
                         //isPush = true,
                         images = x.images.Select(img => new
                         {
@@ -1311,6 +1317,7 @@ namespace RealEstateApi.Controllers
 
             try
             {
+                var currentUserId = GetCurrentUserId();
                 var latestEstates = await _context.RealEstates
                     .OrderByDescending(r => r.postedDate)
                     .Take(count)
@@ -1335,6 +1342,7 @@ namespace RealEstateApi.Controllers
                         r.length,
                         r.width,
                         r.postedDate,
+                        isPush = r.createdBy == currentUserId && r.postedDate.AddHours(48) <= DateTime.UtcNow,
                         images = r.images.Select(i => new
                         {
                             i.imageId,
@@ -1370,6 +1378,18 @@ namespace RealEstateApi.Controllers
                     count = g.Count()
                 })
                 .ToListAsync();
+
+                var customOrder = new List<string>
+                {
+                    "Đang bán",
+                    "68 land bán",
+                    "Chủ nhà bán",
+                    "Dừng bán"
+                };
+                trangThai = trangThai
+                .OrderBy(x => customOrder.IndexOf(x.status ?? ""))
+                .ToList();
+
                 var dauChuList = await _context.Users
                     .Where(u => u.role == 2)
                     .Select(u => new
@@ -1383,6 +1403,7 @@ namespace RealEstateApi.Controllers
                         dungBan = _context.RealEstates.Count(r => r.createdBy == u.userId && r.status == "Dừng bán"),
                         tong = _context.RealEstates.Count(r => r.createdBy == u.userId)
                     })
+                .OrderByDescending(x => x.tong)
                 .ToListAsync();
 
                 var statistics = new
@@ -1443,7 +1464,7 @@ namespace RealEstateApi.Controllers
 
                 // Kiểm tra quyền: chỉ đầu chủ của BĐS đó được đẩy
                 if (estate.createdBy != userId)
-                    return Unauthorized(ApiResult.Error<object>("Không có quyền đẩy tin", 403));
+                    return BadRequest(ApiResult.Error<object>("Không có quyền đẩy tin", 403));
 
                 // Kiểm tra thời gian đăng đã đủ 48 giờ chưa
                 var hoursSincePosted = (DateTime.UtcNow - estate.postedDate).TotalHours;
